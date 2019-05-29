@@ -1,0 +1,1610 @@
+The Security Impact of HTTPS Interception
+Zakir Durumeric∗∨, Zane Ma
+†
+, Drew Springall∗, Richard Barnes
+‡
+, Nick Sullivan
+§
+,
+Elie Bursztein
+¶
+, Michael Bailey
+†
+, J. Alex Halderman∗, Vern Paxsonk∨
+∗
+University of Michigan
+†
+University of Illinois Urbana-Champaign
+‡
+Mozilla
+§
+Cloudﬂare
+¶
+Google
+k
+University of California Berkeley ∨ International Computer Science Institute
+Abstract—As HTTPS deployment grows, middlebox and an-
+connection to the destination server. We show that web servers
+tivirus products are increasingly intercepting TLS connections to can detect such interception by identifying a mismatch between
+retain visibility into network trafﬁc. In this work, we present a
+the HTTP User-Agent header and the behavior of the TLS client.
+comprehensive study on the prevalence and impact of HTTPS in-
+TLS implementations display varied support (and preference
+terception. First, we show that web servers can detect interception
+order) for cipher suites, extensions, elliptic curves, compression
+by identifying a mismatch between the HTTP User-Agent header
+methods, and signature algorithms. We characterize these
+and TLS client behavior. We characterize the TLS handshakes
+variations for major browsers and popular interception products
+of major browsers and popular interception products, which
+in order to construct heuristics for detecting interception and
+we use to build a set of heuristics to detect interception and
+identifying the responsible product.
+identify the responsible product. We deploy these heuristics at
+three large network providers: (1) Mozilla Firefox update servers,
+Next, we assess the prevalence and impact of HTTPS
+(2) a set of popular e-commerce sites, and (3) the Cloudﬂare
+interception by applying our heuristics to nearly eight billion
+content distribution network. We ﬁnd more than an order of
+connection handshakes. In order to avoid the bias inherent in
+magnitude more interception than previously estimated and with
+any single network vantage point, we analyzed connections for
+dramatic impact on connection security. To understand why
+security suffers, we investigate popular middleboxes and client-
+one week at three major Internet services: (1) Mozilla Firefox
+side security software, ﬁnding that nearly all reduce connection update servers, (2) a set of popular e-commerce websites, and
+security and many introduce severe vulnerabilities. Drawing on
+(3) the Cloudﬂare content distribution network. These providers
+our measurements, we conclude with a discussion on recent
+serve different types of content and populations of users, and
+proposals to safely monitor HTTPS and recommendations for
+we ﬁnd differing rates of interception: 4.0% of Firefox update
+the security community.
+connections, 6.2% of e-commerce connections, and 10.9% of
+U.S. Cloudﬂare connections were intercepted. While these rates
+I. I
+NTRODUCTION
+vary by vantage point, all are more than an order of magnitude
+higher than previous estimates [27], [46].
+When it comes to HTTPS, the security community is work-
+ing at cross purposes. On the one hand, we are striving to harden To quantify the real-world security impact of the observed
+and ubiquitously deploy HTTPS in order to provide strong end- interception, we establish a grading scale based on the TLS
+to-end connection security [5], [20], [22], [23], [34], [51]. At features advertised by each client. By applying the metric
+the same time, middlebox and antivirus products increasingly to unmodiﬁed browser handshakes and to the intercepted
+intercept (i.e., terminate and re-initiate) HTTPS connections connections seen at each vantage point, we calculate the
+in an attempt to detect and block malicious content that uses change in security for intercepted connections. While for
+the protocol to avoid inspection [6], [12], [15], [27]. Previous some older clients, proxies increased connection security, these
+work has found that some speciﬁc HTTPS interception products improvements were modest compared to the vulnerabilities
+dramatically reduce connection security [7], [12], [58]; however, introduced: 97% of Firefox, 32% of e-commerce, and 54%
+the broader security impact of such interception remains unclear. of Cloudﬂare connections that were intercepted became less
+In this paper, we conduct the ﬁrst comprehensive study of secure. Alarmingly, not only did intercepted connections
+HTTPS interception in the wild, quantifying both its prevalence use weaker cryptographic algorithms, but 10–40% advertised
+in trafﬁc to major services and its effects on real-world security. support for known-broken ciphers that would allow an active
+man-in-the-middle attacker to later intercept, downgrade, and
+We begin by introducing a novel technique for passively de-
+decrypt the connection. A large number of these severely
+tecting HTTPS interception based on handshake characteristics.
+broken connections were due to network-based middleboxes
+HTTPS interception products typically function as transparent
+rather than client-side security software: 62% of middlebox
+proxies: they terminate the browser’s TLS connection, inspect
+connections were less secure and an astounding 58% had severe
+the HTTP plaintext, and relay the HTTP data over a new TLS
+vulnerabilities enabling later interception.
+Finally, we attempt to understand why such a large number
+Permission to freely reproduce all or part of this paper for noncommercial
+of intercepted connections are vulnerable by testing the security
+purposes is granted provided that copies bear this notice and the full citation of a range of popular corporate middleboxes, antivirus products,
+on the ﬁrst page. Reproduction for commercial purposes is strictly prohibited
+and other software known to intercept TLS. The default settings
+without the prior written consent of the Internet Society, the ﬁrst-named author
+for eleven of the twelve corporate middleboxes we evaluated
+(for reproduction of an entire paper only), and the author’s employer if the
+expose connections to known attacks, and ﬁve introduce severe
+paper was prepared within the scope of employment.
+NDSS’17, 26 February–1 March, 2017, San Diego, CA, USA
+vulnerabilities (e.g., incorrectly validate certiﬁcates). Similarly,
+http://dx.doi.org/10.14722/ndss.2017.23456
+18 of the 20 client-side security products we tested reduceconnection security, and half introduce severe vulnerabilities. Client  HTTPS Proxy Server
+In some cases, manufacturers attempted to customize libraries
+ClientHello
+ClientHello
+Handshake Protocol: Client Hello
+or re-implement TLS, introducing negligent vulnerabilities. In
+  Version: TLS 1.2 (0x0303)
+Handshake Protocol: Client Hello
+  Cipher Suites (2 suites)
+  Version: TLS 1.0 (0x0301)
+other cases, products shipped with libraries that were years out
+    Cipher Suite: TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 (0xc02b)
+  Cipher Suites Length: 4
+    Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xc02f)
+  Cipher Suites (2 suites)
+  Extension: ec_point_formats
+    Cipher Suite: TLS_DHE_RSA_WITH_AES_256_CBC_SHA (0x0039)
+of date. Across the board, companies are struggling to correctly     Elliptic curves point formats (1)
+    Cipher Suite: TLS_RSA_EXPORT_WITH_DES40_CBC_SHA (0x0011)
+      EC point format: uncompressed (0)
+  Extension: server_name
+  Extension: elliptic_curves
+deploy the base TLS protocol, let alone implement modern
+    Elliptic curves (2 curves) 
+   Elliptic curve: secp256r1 (0x0017)
+      Elliptic curve: secp256r1 (0x0018)
+HTTPS security features.
+  Extension: Application Layer Protocol Negotiation
+  Extension: server_name
+Remainder of   TLS Handshake
+Our results indicate that HTTPS interception has become HTTP Request
+startlingly widespread, and that interception products as a class
+Hypertext Transfer Protocol
+  Get / HTTP/1.1\r\n
+  Host: www.illinois.edu
+have a dramatically negative impact on connection security. We   Connection: keep-alive\r\n
+  User-Agent: Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko
+hope that shedding light on this state of affairs will motivate
+Fig. 1: HTTPS Interception—Products monitor HTTPS
+improvements to existing products, advance work on recent
+connections by acting as transparent proxies that terminate
+proposals for safely intercepting HTTPS [26], [38], [44], [54],
+the browser TLS session, inspect content, and establish a new
+and prompt discussion on long-term solutions.
+connection to the destination server. These proxies use different
+TLS libraries than popular browsers, which allows us to detect
+II. B
+ACKGROUND
+interception by identifying a mismatch between the HTTP
+User-Agent header and TLS client behavior.
+In this section, we provide a brief background on HTTPS
+interception and describe the aspects of HTTP and TLS that are
+relevant to our ﬁngerprinting techniques. We refer the reader
+As of early 2016, there exist more than 340 cipher suites,
+to RFC 5280 [14] for a detailed description of TLS.
+36 elliptic curves, 3 elliptic curve point formats, 28 signature
+algorithms, and 27 extensions that clients can advertise [29],
+A. TLS Interception
+[30]. In practice, browsers and security products use varying
+Client-side software and network middleboxes that inspect TLS libraries and advertise different handshake parameters. As
+HTTPS trafﬁc operate by acting as transparent proxies. They we will show in Section III, these characteristic variations allow
+terminate and decrypt the client-initiated TLS session, analyze us to uniquely identify individual TLS implementations based
+the inner HTTP plaintext, and then initiate a new TLS on their handshakes.
+connection to the destination website. By design, TLS makes
+such interception difﬁcult by encrypting data and defending
+C. HTTP User-Agent Header
+against man-in-the-middle attacks through certiﬁcate validation,
+The HTTP protocol allows the client and server to pass
+in which the client authenticates the identity of the destination
+additional information during a connection by including header
+server and rejects impostors. To circumvent this validation,
+ﬁelds in their messages. For example, the client can include the
+local software injects a self-signed CA certiﬁcate into the client
+Accept-Charset: utf-8
+header to indicate that it expects
+browser’s root store at install time. For network middleboxes,
+content to be encoded in UTF-8. One standard client header
+administrators will similarly deploy the middlebox’s CA
+is the User-Agent header, which indicates the client browser
+certiﬁcate to devices within their organization. Subsequently,
+and operating system in a standardized format. There has been
+when the proxy intercepts a connection to a particular site, it
+signiﬁcant prior study on User-Agent header spooﬁng. These
+will dynamically generate a certiﬁcate for that site’s domain
+studies have largely found that end users do not spoof their own
+name signed with its CA certiﬁcate and deliver this certiﬁcate
+User-Agent header [18], [45], [61]. For example, Eckersley
+chain to the browser. Unless users manually verify the presented
+found that only 0.03% of connections with a Firefox User-
+certiﬁcate chain, they are unlikely to notice that the connection
+Agent supported features unique to Internet Explorer, indicating
+has been intercepted and re-established.
+1
+spooﬁng [18]. Fingerprinting studies commonly trust the User-
+Agent string [40], and we follow suit in this work.
+B. TLS Feature Negotiation
+TLS clients and servers negotiate a variety of protocol
+III. TLS I
+MPLEMENTATION
+H
+EURISTICS
+parameters during a connection handshake [14]. In the ﬁrst
+protocol message, Client Hello, the client speciﬁes what TLS
+Our methodology for identifying interception is based on
+version and features it supports. It sends ordered lists of
+detecting a mismatch between the browser speciﬁed in the
+cipher suites, compression methods, and extensions—which
+HTTP User-Agent header and the cryptographic parameters
+themselves frequently contain additional parameters, such as
+advertised during the TLS handshake (Figure 1). In this section,
+supported elliptic curves and signature algorithms. The server
+we characterize the handshakes from popular browsers and
+then selects a mutually agreeable choice from each list of
+develop heuristics that determine whether a TLS handshake is
+options. This extensibility facilitates the continuing evolution
+consistent with a given browser. We then go on to ﬁngerprint
+of features and provides adaptability in the wake of new attacks.
+the handshakes produced by popular security products in order
+to identify the products responsible for interception in the wild.
+1
+Contrary to widespread belief, public key pinning [19]—an HTTPS feature
+that allows websites to restrict connections to a speciﬁc key—does not prevent
+A. Web Browsers
+this interception. Chrome, Firefox, and Safari only enforce pinned keys when
+a certiﬁcate chain terminates in an authority shipped with the browser or
+We captured the TLS handshakes generated by the four
+operating system. The extra validation is skipped when the chain terminates in
+most popular browsers: Chrome, Safari, Internet Explorer,
+a locally installed root (i.e., a CA certiﬁcate installed by an administrator) [34].
+Internet Explorer and Edge do not support key pinning [39].
+and Firefox [57]. To account for older versions, differing
+2operating systems, and varying mobile hardware, we generated orderings for each version of Chrome, and furthermore, users
+and captured handshakes in different environments using can disable individual cipher suites. We check for ciphers and
+BrowserStack [4], a cloud service that provides developers extensions that Chrome is known to not support, but do not
+with a variety of virtual machines for testing websites.
+2
+check for the inclusion of speciﬁc ciphers or extensions, nor
+do we validate their order. When appropriate, we check the
+We analyzed the non-ephemeral parameters advertised in
+presence and order of elliptic curves, compression methods,
+the TLS handshakes, ﬁnding that each browser family selects a
+and EC point formats. We note that because Chrome uses
+unique set of options, and that these options differ from those
+BoringSSL, an OpenSSL fork, connections have a similar
+used by both common libraries (e.g., OpenSSL) and popular
+structure to OpenSSL. However, Chrome supports considerably
+interception products.
+3
+However, while each browser, library,
+fewer options, including a subset of the default extensions,
+and security product produces a unique Client Hello message,
+ciphers, and elliptic curves advertised by OpenSSL.
+the parameters selected by browsers are not statically deﬁned.
+Instead, browsers alter their behavior based on hardware support,
+Microsoft Internet Explorer and Edge Internet Explorer is
+operating system updates, and user preferences.
+less consistent than the other browsers for two reasons: (1)
+administrators can enable new ciphers, disable default ciphers,
+Instead of generating all possible permutations, we analyzed
+and arbitrarily reorder cipher suites through Windows Group
+when browsers select different parameters and developed a set
+Policy and registry changes, and (2) IE uses the Microsoft
+of heuristics that determine whether a speciﬁc handshake could
+SChannel library, an OS facility which behaves differently
+have been generated by a given browser. For example, none
+depending on both Windows updates and browser version.
+of the four browsers have ever supported the TLS Heartbeat
+Because of this additional ﬂexibility, it is hard to rule out
+extension [53]. If a browser connection advertises its support,
+handshakes that include outdated ciphers, so we introduce
+we know that the session was intercepted. On the other hand,
+a third categorization, unlikely, which we use to indicate
+despite the fact that all four browsers have default support for
+conﬁgurations that are possible but improbable in practice (e.g.,
+AES-based ciphers, the lack of these ciphers does not indicate
+including an export-grade cipher suite). We note that minor
+interception, because browsers allow users to disable speciﬁc
+OS updates alter TLS behavior, but are not indicated by the
+cipher suites. This methodology has the advantage of excluding
+HTTP User-Agent header. We mark behavior consistent with
+false positives that arise from uncommon user conﬁgurations.
+any OS update as valid. SChannel connections can by uniquely
+However, it can yield false negatives if a proxy copies TLS
+identiﬁed because SChannel is the only TLS library we tested
+parameters from the original client connection.
+that includes the OCSP status request extension before the
+We describe the heuristics for each browser below:
+supported groups and EC point formats extensions.
+Mozilla Firefox Firefox was the most consistent of the four
+Apple Safari Apple Safari ships with its own TLS imple-
+browsers, and by default, each version produces a nearly
+mentation, Apple Secure Transport, which does not allow user
+identical Client Hello message regardless of operating system
+customization. The order of ciphers and extensions is enforced
+and platform. All parameters, including TLS extensions, ciphers,
+in code. While extension order does not vary, the NPN, ALPN,
+elliptic curves, and compression methods are predetermined
+and OCSP stapling extensions are frequently excluded, and the
+and hard-coded by the browser. Users can disable individual
+desktop and mobile versions of Safari have different behavior.
+ciphers, but they cannot add new ciphers nor reorder them. To
+One unique aspect of Secure Transport is that it includes the
+determine whether a Firefox session has been intercepted, we
+TLS_EMPTY_RENEGOTIATION_INFO_SCSV cipher ﬁrst,
+check for the presence and order of extensions, cipher suites,
+whereas the other libraries we investigated include the cipher
+elliptic curves, EC point formats, and handshake compression
+last. Similar to Microsoft, Apple has changed TLS behavior in
+methods. Mozilla maintains its own TLS implementation,
+minor OS updates, which are not indicated in the HTTP User-
+Mozilla Network Security Services (NSS) [42]. NSS speciﬁes
+Agent header. We allow for any of the updates when validating
+extensions in a different order than the other TLS libraries
+handshakes, and we check for the presence and ordering of
+we tested, which allows it to be easily distinguished from
+ciphers, extensions, elliptic curves, and compression methods.
+other implementations. The library is unlikely to be directly
+integrated into proxies because it is seldom used in server-side
+B. Fingerprinting Security Products
+applications.
+While our heuristics enable us to detect when interception is
+Google Chrome Chrome was one of the most challenging
+occurring, they do not indicate what intercepted the connection.
+browsers to ﬁngerprint because its behavior is dependent on
+To identify products used in the wild, we installed and
+hardware support and operating system. For example, Chrome
+ﬁngerprinted the Client Hello messages generated by well-
+prioritizes ChaCha-20-based ciphers on Android devices that
+known corporate middleboxes (Figure 3), antivirus software
+lack hardware AES acceleration [10] and Chrome on Win-
+(Figure 4), and other client-side software previously found to
+dows XP does not advertise support for ECDSA keys at all.
+intercept connections (e.g., SuperFish [8]). In this section, we
+These optimizations result in several valid cipher and extension
+describe these products.
+2
+We analyzed Chrome 34–50 and Firefox 3–46 on Windows XP, 7, 8, 8.1,
+We generate a ﬁngerprint for each product by hashing the
+and 10 and Mac OS X Snow Leopard, Lion, Mountain Lion, Mavericks, non-ephemeral parameters advertised in the Client Hello mes-
+Yosemite, and El Capitan. We additionally captured handshakes from Apple
+sage (i.e., version, ciphers, extensions, compression methods,
+Safari 5–9, Internet Explorer 6–11, Microsoft Edge, and the default Android
+elliptic curves, and signature methods). When we detect that a
+browser on Android 4.0–5.0. In total, we collected 874 ﬁngerprints.
+handshake is inconsistent with the indicated browser, we check
+3
+Wecomparethepresenceandorderofciphersuites,extensions,compression
+methods, elliptic curves, signature algorithms, and elliptic curve point formats.
+for an exact match with any of the ﬁngerprints we collected.
+3This strategy has several potential weaknesses. First, multiple
+% HTTPS Connections Intercepted
+Vantage Point
+products could share a single ﬁngerprint. This seems particularly
+NoInterception Likely Conﬁrmed
+likely given that developers are likely to use one of a small
+Cloudﬂare 88.6% 0.5% 10.9%
+number of popular TLS libraries (e.g., OpenSSL). Second, if
+Firefox 96.0% 0.0% 4.0%
+products allow customization, then ﬁngerprints of the default
+E-commerce 92.9% 0.9% 6.2%
+conﬁguration will not match these customized versions.
+Fig. 2: Detecting Interception—We quantify HTTPS intercep-
+Surprisingly, we ﬁnd that none of the browsers nor the
+tion at three major Internet services. We estimate that 5–10%
+104 products we manually investigated shared ﬁngerprints,
+of connections are intercepted.
+except for eight pieces of unwanted software that all use
+the Komodia Redirector SDK [32]. In other words, these
+ﬁngerprints uniquely identify a single product. None of the Cloudﬂare content distribution network. We observed 7.75 bil-
+client-side security products we tested allow users to customize lion TLS handshakes across the three networks. By deploying
+TLS settings. However, many of the corporate middleboxes the heuristics on different networks, we avoid the bias inherent
+allow administrators to specify custom cipher suites. In this of any single vantage point. However, as we will discuss in the
+situation, we would be able to detect that interception is next section, we ﬁnd varying amounts of interception and abuse
+occurring, but not identify the responsible product. on each network. Below, we describe each perspective in detail:
+Middleboxes and Corporate Proxies Nearly every major
+Firefox Update Servers Firefox browsers routinely check for
+networking hardware manufacturer—including Barracuda, Blue
+software updates by retrieving an XML document from a central
+Coat, Cisco, and Juniper—produces middleboxes that support
+Mozilla server over HTTPS. This check uses Firefox’s standard
+“SSL Inspection”. These devices allow organizations to intercept
+TLS library (Mozilla NSS) and occurs every 24 hours while
+TLS trafﬁc at their network border for analysis, content ﬁltering,
+the browser is running and on browser launch if the last update
+and malware detection. In March 2015, Dormann documented
+occurred more than 24 hours prior. We used Bro [49] to monitor
+products from nearly 60 manufacturers that advertise this
+connections to
+aus5.mozilla.org
+—the update server used
+functionality [15]. We conﬁgured and ﬁngerprinted twelve
+by Firefox versions 43–48—between February 14–26, 2016.
+appliance demos from well-known manufacturers (e.g., Cisco
+During this period, we observed 4.36 billion connections from
+and Juniper) and anecdotally popular companies (e.g., A10 and
+45K ASes and 243 of the 249 ISO-deﬁned countries. Because
+Forcepoint), per Figure 3. We note one conspicuous absence:
+we collected trafﬁc using an on-path monitor instead of on
+ZScaler SSL Inspection. ZScaler provides a cloud-based SSL
+the web server, we do not have access to the HTTP User-
+inspection service, but did not provide us with a trial or demo.
+Agent header. However, only speciﬁc versions of Firefox are
+conﬁgured to connect to the server. Instead of looking for a
+Antivirus Software We installed, tested, and ﬁngerprinted
+mismatch with the HTTP User-Agent, we look for a mismatch
+popular antivirus products based on the software documented by
+between TLS handshake and any of the Firefox versions
+de Carné de Carnavalet and Mannan [12], products previously
+conﬁgured to connect to the server. There is no user-accessible
+found to be intercepting connections [27], [46], and a report
+content available on the site and there should be negligible
+of popular antivirus products [47]. Products from twelve
+other trafﬁc. This vantage point provides one of the cleanest
+vendors inject a new root certiﬁcate and actively intercept TLS
+perspectives on clients affected by TLS interception. However,
+connections.
+4
+We list the products that intercept connections
+it only provides data for Firefox, one of the browsers believed
+in Figure 4.
+5 to be least affected by client-side interception software [12].
+Popular E-commerce Sites During two weeks in August and
+Unwanted Software and Malware Motivated by recent
+September 2015, a set of popular e-commerce sites hosted
+reports of unwanted software intercepting TLS connections,
+JavaScript that loaded an invisible pixel from an external
+we ﬁngerprinted the Komodia SDK [32], which is used by
+server that recorded the raw TLS Client Hello, HTTP User-
+Superﬁsh, Qustodio, and several pieces of malware [8], [56],
+Agent string, and client HTTP headers. This perspective sees
+and the NetFilter SDK [1], which is used by PrivDog.
+trafﬁc from all browsers, but may suffer from falsiﬁed User-
+We tested products in January–March, 2016. We are
+Agent headers. However, because the measurement required
+publishing our browser heuristics and product ﬁngerprints at
+JavaScript execution, the dataset excludes simple page fetches.
+https://github.com/zakird/tlsﬁngerprints.
+The sites have an international presence, but the connections
+we observe are likely skewed towards desktop users because
+the e-commerce provider has popular mobile applications.
+IV. M
+EASURING
+TLS I
+NTERCEPTION
+The dataset has the added beneﬁt that it contains HTTP
+We measured global interception rates by deploying our
+headers beyond User-Agent, which allow another avenue for
+heuristics at three network vantage points: Mozilla Firefox
+detecting interception: looking for proxy related headers (e.g.,
+update servers, a set of popular e-commerce websites, and the
+X-Forwarded-For
+and
+X-BlueCoat-Via
+) and the modiﬁca-
+tions documented by Weaver et al. [60].
+4
+We found that the following products did not intercept HTTPS: 360 Total,
+Ahnlabs V3 Internet Security, Avira AV 2016, Comodo Internet Security, F- Cloudﬂare Cloudﬂare is a popular CDN and DDoS protection
+Secure Safe, GDATA products, K7 Total Security, Malwarebytes, McAfee
+company that serves approximately 5% of all web trafﬁc [25].
+Internet Security, Microsoft Windows Defender, Norton Security, Panda Internet
+Cloudﬂare provides these services by acting as a reverse
+Security 2016, Security Symantec Endpoint Protection, Tencent PC Manager,
+proxy. Clients connect to one of Cloudﬂare’s servers when
+Trend Micro Maximum Security 10, and Webroot SecureAnywhere.
+5
+A preprint of this paper incorrectly listed GDATA products in Figure 4.
+accessing a website, which serve cached content or proxy
+4Validates Modern Advertises TLS
+Product Grade Grading Notes
+Certiﬁcates Ciphers RC4 Version
+A10 vThunder SSL Insight F
+3 3
+Yes 1.2 Advertises export ciphers
+Blue Coat ProxySG 6642 A*
+3 3
+No 1.2 Mirrors client ciphers
+Barracuda 610Vx Web Filter C
+3 5
+Yes 1.0 Vulnerable to Logjam attack
+Checkpoint Threat Prevention F
+3 5
+Yes 1.0 Allows expired certiﬁcates
+Cisco IronPort Web Security F
+3 3
+Yes 1.2 Advertises export ciphers
+Forcepoint TRITON AP-WEB Cloud C
+3 3
+No 1.2 Accepts RC4 ciphers
+Fortinet FortiGate 5.4.0 C
+3 3
+No 1.2 Vulnerable to Logjam attack
+Juniper SRX Forward SSL Proxy C
+3 5
+Yes 1.2 Advertises RC4 ciphers
+Microsoft Threat Mgmt. Gateway F
+5 5
+Yes SSLv2 No certiﬁcate validation
+Sophos SSL Inspection C
+3 3
+Yes 1.2 Advertises RC4 ciphers
+Untangle NG Firewall C
+3 5
+Yes 1.2 Advertises RC4 ciphers
+WebTitan Gateway F
+5 3
+Yes 1.2 Broken certiﬁcate validation
+Fig. 3: Security of TLS Interception Middleboxes—We evaluate popular network middleboxes that act as TLS interception
+proxies. We ﬁnd that nearly all reduce connection security and ﬁve introduce severe vulnerabilities. *Mirrors browser ciphers.
+Browser MITM Validates Modern TLS
+Product OS Grade Grading Notes
+IE Chrome Firefox Safari
+Certiﬁcates Ciphers Version
+Avast ...
+AV 11 Win   # # A*
+3 3
+1.2 Mirrors client ciphers
+AV 11.7 Mac       F
+3 3
+1.2 Advertises DES
+AVG ...
+Internet Security 2015–6 Win     # C
+3 3
+1.2 Advertises RC4
+Bitdefender ...
+Internet Security 2016 Win       C
+3
+# 1.2 RC4, 768-bit D-H
+Total Security Plus 2016 Win       C
+3
+# 1.2 RC4, 768-bit D-H
+AV Plus 2015–16 Win       C
+3
+# 1.2 RC4, 768-bit D-H
+Bullguard ...
+Internet Security 16 Win       A*
+3 3
+1.2 Mirrors client ciphers
+Internet Security 15 Win       F
+3 5
+1.0 Advertises DES
+CYBERsitter ...
+CYBERsitter 11 Win       F
+5 5
+1.2 No cert. validation, DES
+Dr. Web ...
+Security Space 11 Win       C
+3
+# 1.2 RC4, FREAK
+Dr. Web 11 for OS X Mac       F
+3 5
+1.0 Export ciphers, DES, RC2
+ESET ...
+NOD32 AV 9 Win       F # # 1.2 Broken cert. validation
+Kaspersky ...
+Internet Security 16 Win       C
+3 3
+1.2 CRIME vulnerability
+Total Security 16 Win       C
+3 3
+1.2 CRIME vulnerability
+Internet Security 16 Mac       C
+3 3
+1.2 768-bit D-H
+KinderGate ...
+Parental Control 3 Win       F #
+5
+1.0 Broken cert. validation
+Net Nanny ...
+Net Nanny 7 Win       F
+3 3
+1.2 Anonymous ciphers
+Net Nanny 7 Mac       F
+3 3
+1.2 Anonymous ciphers
+PC Pandora ...
+PC Pandora 7 Win   G# G# F
+5 5
+1.0 No certiﬁcate validation
+Qustodio ...
+Parental Control 2015 Mac       F
+3 3
+1.2 Advertises DES
+Interception: Certiﬁcate Validation: Modern Ciphers:
+# No Interception (conn. allowed)
+5
+No Validation
+5
+No Support
+G# Connections Blocked # Broken Validation # Non-preferred Support
+  Connections Intercepted
+3
+Correct Validation
+3
+Preferred Support
+Fig. 4: Security of Client-side Interception Software—We evaluate and ﬁngerprint popular antivirus and client-side security
+products, ﬁnding that products from twelve vendors intercept connections.
+5
+In all but two cases, products degrade TLS connection
+security. *Mirrors browser ciphers.
+5 100
+Detection Method Firefox E-commerce Cloudﬂare
+ 80
+Invalid Extensions 16.8% 85.6% 89.0%
+ 60
+Invalid Ciphers 98.1% 54.2% 68.7%
+Invalid Version – 2.0% –
+ 40
+Invalid Curves – 5.5% 9.4%
+Mozilla Update Server
+Invalid Extension Order 87.7% 33.9% 40.4%
+ 20
+E-commerce Sites
+Invalid Cipher Order 98.8% 21.2% 21.1%
+Cloudflare CDN
+ 0
+Missing Required Ext. 97.9% 91.1% 50.9%
+CDF Intercepted Traffic
+ 1  10  100  1000
+Injected HTTP Header – 14.0% –
+Client Hello Fingerprints
+Fig. 7: Handshake Mismatches—We break down the mis-
+Fig. 5: CDF of Interception Fingerprints—We ﬁngerprint
+matches used to detect intercepted sessions. For more than 85%
+non-ephemeral parameters in replacement Client Hello mes-
+of intercepted connections, we detect an invalid handshake
+sages to track the products that perform interception. Ten
+based on the use of unsupported extensions, ciphers, or curves.
+ﬁngerprints account for 69% of the intercepted e-commerce
+Some features were unavailable for Firefox and Cloudﬂare.
+trafﬁc, 69% of Firefox update trafﬁc, and 42% of Cloudﬂare
+trafﬁc.
+A. Firefox Update Server
+HTTPS connections for 4.0% of Firefox clients were inter-
+Fingerprint Description % Total
+cepted, which is the lowest rate among the three perspectives.
+Unknown 17.1% Interception is likely less common for Firefox users because the
+Avast Antivirus 10.8%
+browser ships with its own certiﬁcate store, whereas Internet
+Unknown 9.4%
+Explorer, Chrome, and Safari use the host operating system’s
+Blue Coat 9.1%
+root store. Prior work [12] and our own testing (Figure 4) both
+Unknown 8.3%
+ﬁnd that some antivirus products (e.g., Avast) will intercept
+E-commerce
+Avast Antivirus 9.1% connections from these other browsers but neglect to proxy
+AVG Antivirus 7.0%
+Firefox sessions. In corporate environments, administrators can
+Unknown. Likely AV; mainly Windows 10/Chrome 47 6.5%
+separately install additional root authorities in Firefox [41],
+Kaspersky Antivirus 5.0%
+but the added step may dissuade organizations that proxy
+BitDefender Antivirus 3.1%
+Cloudﬂare
+connections from deploying the browser.
+Bouncy Castle (Android 5) 26.3%
+Bouncy Castle (Android 4) 21.6% Sources of Interception The two most common interception
+Unknown. Predominantly India 5.0%
+ﬁngerprints belong to the default conﬁgurations of Bouncy Cas-
+ESET Antivirus 2.8%
+tle on Android 4.x and 5.x, and account for 47% of intercepted
+Firefox Dr. Web Antivirus 2.6%
+clients (Figure 5). These ﬁngerprints were concentrated in large
+ASes belonging to mobile wireless providers, including Verizon
+Fig. 6: Top Interception Fingerprints—We show the prod-
+Wireless, AT&T, T-Mobile, and NTT Docomo (a Japanese
+ucts responsible for the most interception at each vantage point.
+mobile carrier). As can be seen in Figure 9, 35% of all Sprint
+and 25.5% of all Verizon Firefox connections (including non-
+intercepted) matched one of the two ﬁngerprints. It is possible
+the connection to the origin web server. We logged the raw
+to intercept TLS connections on Android using the VPN
+TLS Client Hello messages and HTTP User-Agent for a
+and/or WiFi permissions. However, given the default values,
+random 0.5% sample of all TLS connections to Cloudﬂare’s
+it is unclear exactly which Android application is responsible
+frontend between May 13–20, 2016. We measure interception
+for the interception. Bouncy Castle on Android 5.x provides
+by detecting mismatches between the HTTP User-Agent and
+reasonable ciphers equivalent to a modern browser; on Android
+the TLS handshake. Cloudﬂare provides a more representative
+4.x, Bouncy Castle advertises export-grade cipher suites, making
+sample of browsers than the Firefox update servers. However,
+it vulnerable to interception by an on-path attacker. The third
+one of Cloudﬂare’s foremost goals is to prevent DDoS attacks
+most common ﬁngerprint accounts for 5.3% of Firefox trafﬁc.
+and other abuse (e.g., scripted login attempts), so the data is
+We were not able to identify the product associated with the
+messier than the other two datasets, and a portion of connections
+ﬁngerprint but note that nearly half of its trafﬁc occurred in
+likely have falsiﬁed HTTP User-Agent headers.
+India and its diurnal and weekend patterns are consistent with
+home antivirus or malware.
+Temporal Pattern The number of raw intercepted connections
+V. R
+ESULTS
+mirrors the diurnal pattern of all Firefox trafﬁc. As can be seen
+in Figure 8, there are typically more connections on weekdays,
+Our three vantage points provide varying perspectives on and we observe the peak number of connections on weekday
+the total amount of interception: 4.0% of Firefox update mornings. This intuitively aligns with the ﬁrst computer access
+connections, 6.2% of the e-commerce connections, and 10.9% of the day triggering a connection to the Firefox update
+of Cloudﬂare sessions in the United States (Figure 2). In all server. Oddly, though, the percentage of intercepted trafﬁc
+cases, this is more than an order of magnitude higher than is inversely proportional to total trafﬁc, peaking near midnight
+previously estimated [27], [46]. and in the early morning. When we remove the two Android
+6MITM Detected MITM rate Adj. MITM rate
+Country MITM % Country MITM %
+1.6M
+ 0.07
+Guatemala 15.0% Kiribati 8.2%
+1.4M
+Greenland 9.9% Iran 8.1%
+ 0.06
+1.2M
+South Korea 8.8% Tanzania 7.3%
+ 0.05
+1.0M MITM rate Kuwait 8.5% Bahrain 7.3%
+ 0.04
+800K
+Qatar 8.4% Afghanistan 6.7%
+ 0.03
+600K
+Fig. 10: Countries with Highest Firefox Interception—We
+MITM Detected 400K
+ 0.02
+show the ten countries with the highest interception rates when
+200K
+ 0.01
+connecting to the Mozilla update server. Countries with above
+average interception rates generally have a large amount of
+Sat 02-20 Sun 02-21 Mon 02-22 Tue 02-23 Wed 02-24
+Date
+trafﬁc intercepted by a single, dominant mobile provider.
+Fig. 8: Temporal Variation in Firefox Interception—We
+observe the highest amount of raw interception during times of
+rate around 50% that begins in the morning and ends near
+peak trafﬁc, but the highest interception rates during periods
+midnight everyday. It is unclear what behavior results in this
+of low total trafﬁc. This is likely because the two largest
+temporal pattern.
+ﬁngerprints are associated with mobile carriers and will update
+at night when desktop computers are powered off. Excluding
+these two ﬁngerprints, interception remains relatively stable.
+B. Popular E-commerce Sites
+The e-commerce dataset is composed of visits to set of
+Sprint AT&T Mobile Free Mobile
+popular e-commerce websites and is not limited to a speciﬁc
+Marubeni T-Mobile MCI
+NTT Docomo Verizon Top 500
+browser version. To account for this, we parsed the HTTP User-
+Agent header and identiﬁed mismatches between the announced
+ 0.6
+browser and TLS handshake. We observed 257K unique User-
+ 0.5
+Agent headers, and successfully parsed the header for 99.5% of
+ 0.4
+connections. The browsers we ﬁngerprinted account for 96.1%
+ 0.3
+of connections; 2.5% belong to browsers we did not ﬁngerprint
+ 0.2
+and 1.4% are from old browser versions.
+MITM rate
+ 0.1
+We ﬁnd that 6.8% of connections were intercepted and
+another 0.9% were likely intercepted, but cannot be deﬁnitively
+Sat 02-20 Sun 02-21 Mon 02-22 Tue 02-23 Wed 02-24
+classiﬁed. For the connections where we could detect a speciﬁc
+Date
+ﬁngerprint, 58% belong to antivirus software and 35% to
+Fig. 9: ASes with Highest Firefox Interception—We ﬁnd
+corporate proxies. Only 1.0% of intercepted trafﬁc is attributed
+that 8 ASes have signiﬁcantly higher interception rates within
+to malware (e.g., SuperFish), and the remaining 6% belong
+the top 500 ASes. All but one are mobile providers.
+to miscellaneous categories. The three most prevalent known
+ﬁngerprints belong to Avast Antivirus, Blue Coat, and AVG
+Antivirus, which account for 10.8%, 9.1%, and 7.6% of
+Bouncy Castle ﬁngerprints, the total percentage of intercepted
+intercepted connections, respectively.
+connections decreases by 47% and no longer peaks during these
+off hours. We suspect that the interception peaks are the result
+The e-commerce dataset also includes HTTP headers,
+of mobile devices remaining on at night when other desktop
+which allow us to identify a subset of connections that were
+computers are powered off. Weekend interception rates level
+intercepted by network middleboxes, but do not match any our
+out around 2% and increase during the weekdays, suggesting
+existing ﬁngerprints. We ﬁnd proxy-related headers in 14.0%
+the presence of corporate TLS proxies.
+of invalid handshakes, most prominently
+X-BlueCoat-Via
+,
+Via
+,
+X-Forwarded-For
+, and
+Client-IP
+. We additionally use
+Geographic Disparities Interception is more prevalent in
+these headers to detect interception. We detected 96.1% of
+several countries (Figure 10). For example, 15% of TLS
+interception based on a version mismatch or the presence of
+connections from Guatemala were intercepted, a rate 3–4
+invalid extensions or ciphers. Another 2.2% of intercepted
+times higher than the global average. This is primarily due
+connections lacked expected extensions, 0.7% used invalid
+to COMCEL, a mobile provider responsible for 34.6% of all
+cipher or extension ordering, and 1.6% contained proxy-related
+Guatemalan update server trafﬁc, having a 32.9% interception
+HTTP headers (Figure 7).
+rate. Greenland has the second highest interception rate (9.9%),
+which is caused by a single AS: TELE Greenland. Nearly Chrome accounts for 40.3% of TLS trafﬁc, of which 8.6%
+half of the interception is performed by a Fortigate middlebox. was intercepted, the highest interception rate of any browser. On
+The third most commonly intercepted country, South Korea, the other extreme, only 0.9% of Mobile Safari connections were
+is one of the most highly mobile-connected countries in intercepted. Interception is far more prominent on Windows,
+the world [55]. In general, large ASes with above average where we see 8.3%–9.6% interception compared to 2.1% on
+interception belong to mobile providers and ﬂuctuate between Mac OS. This is likely because most corporate users use
+20% to 55% interception depending on the time of day, as Windows in the workplace, and many antivirus products that
+seen in Figure 9. The single exception is Marubeni OKI perform interception are Windows-based. We summarize these
+Network Solutions, which maintains a consistent interception results in Figure 13.
+7MITM detected MITM rate
+Falsiﬁed User-Agents It is possible that some connections in
+ 8000  0.18
+the e-commerce dataset have falsiﬁed User-Agents headers,
+ 7000
+ 0.16
+which would artiﬁcially inﬂate the interception rate. We
+ 0.14
+ 6000
+intuitively expect that handshakes belonging to interception
+ 0.12
+products will have a larger number of associated User-Agents
+ 5000
+MITM rate
+ 0.1
+than a custom crawler with a falsiﬁed User-Agent. All but  4000
+ 0.08
+a handful of the TLS products we investigated have at least
+ 3000
+ 0.06
+50 associated User-Agents, and at the extreme, Avast Antivirus
+MITM Detected
+ 2000
+ 0.04
+and Blue Coat’s corporate proxy had 1.8K and 5.2K associated
+ 1000
+ 0.02
+User-Agents, respectively. When we excluded interception
+ 0
+ﬁngerprints associated with less than 50 User-Agents, the global
+Wed 05-18 Thu 05-19 Fri 05-20
+interception rate dropped from 6.8% to 6.2%. Given this modest
+Date
+decrease, we suspect that the mismatches we detect are due to
+Fig. 11: Temporal Variation in Cloudﬂare Interception—
+interception instead of spoofed User-Agents. However, we take
+We observe the highest amount of raw interception during times
+a conservative route and restrict our analysis to the 6.2%.
+of peak trafﬁc, but the highest interception rates during periods
+of low total trafﬁc. This is likely due to higher percentages of
+During our analysis, we noted two irregularities. First,
+automated bot trafﬁc where the User-Agent header is spoofed.
+nearly 3 million connections (approximately 75% of which
+had a Blue Coat header) used the generic User-Agent string
+“
+Mozilla/4.0 (compatible;)
+”). Cisco has documented that
+Network Type No Interception Likely Conﬁrmed
+Blue Coat devices will frequently mask browser User-Agents
+with this generic agent string [31]. Despite knowing Blue Coat
+Residential/Business 86.0% 0.4% 13.6%
+devices intercept these TLS connections, we take the most
+Cell Provider 94.1% 0.1% 5.8%
+conservative approach and exclude these connections from our
+Fig. 12: U.S. Network Breakdown—We show the Cloudﬂare
+analysis because we do not know what percentage of devices
+interception rates for types of U.S. networks.
+behind the proxy would have been identiﬁable. However, we
+note that if we assume the same proportion of identiﬁable
+browsers as the general population (95.6%), Blue Coat would
+users and hosting providers. We limit our analysis to the ASes
+be the second largest ﬁngerprint and the total percentage of
+from the top 50 that were located in the United States and
+connections intercepted would rise from 6.2% to 7.0%. Second,
+primarily serve end users. While this reduces the scope of the
+we ﬁnd that over 90% of Internet Explorer connections on
+dataset, there are lower interception rates in the U.S. compared
+Windows XP appear intercepted because they include modern
+to any other region, providing a conservative lower bound.
+ciphers and extensions that were not previously documented on
+XP, nor that we could reproduce. We exclude these connections.
+In the U.S., we observe a 10.9% interception rate, with
+a stark contrast between mobile ASes (5.2–6.5%) and res-
+idential/enterprise ASes 10.3–16.9%), per Figure 12. Four
+C. Cloudﬂare
+of the top ﬁve handshake ﬁngerprints belong to antivirus
+The Cloudﬂare network provides perhaps the most represen-
+providers: Avast, AVG, Kaspersky, and BitDefender, which
+tative view of global HTTPS trafﬁc, but also the messiest. We
+are also prominent on the e-commerce sites. The remaining
+initially observe a 31% interception rate, which is 3–7 times
+unidentiﬁed ﬁngerprint primarily occurs for Chrome 47 on
+higher than the other vantage points. This elevated interception
+Windows 10. Despite the alignment with a speciﬁc browser
+rate is likely due to abuse (e.g., login attempts or content
+version and OS—which might indicate an incorrect heuristic—
+scraping) and falsiﬁed User-Agent headers—some of the very
+we conﬁrm that this handshake cannot be produced by Chrome
+types of requests that Cloudﬂare protects against. The Firefox
+and advertises 80 cipher suites including IDEA/CAMELLIA,
+server relied on only Firefox browsers accessing an obscure
+diverging signiﬁcantly from the Chrome family. The ﬁngerprint
+update server and the e-commerce websites required JavaScript
+also occurs consistently across non-mobile ASes and peaks
+execution in order to record a TLS connection. In contrast, the
+usage during evening hours, suggesting malware or antivirus
+Cloudﬂare data reﬂects all TLS connections across a broad
+software. These ﬁve ﬁngerprints account for 31% of intercepted
+range of websites, so even simple command line utilities such
+trafﬁc (Table 5).
+as wget and curl can appear in the Cloudﬂare dataset with
+Similar to Firefox updates, the total amount of HTTPS
+falsiﬁed User-Agent headers.
+interception correlates with total HTTPS trafﬁc, peaking in the
+We take several steps to account for this abuse. First, we
+middle of the day and declining during evening hours, but with
+removed ﬁngerprints associated with fewer than 50 unique User-
+the highest interception rates at night (Figure 11). This might
+Agent headers. Next, we limited our analysis to the 50 largest
+be due to mobile trafﬁc as we saw for Firefox but could also
+ASes that are not cloud or hosting providers. Unfortunately,
+indicate the presence of bot trafﬁc.
+even after this ﬁlter, we still observe an artiﬁcially high
+interception rate ranging from 11% in the Americas to 42%
+D. Results Summary and Validation
+in Asia. We ﬁnd that while large ASes in the U.S. have clear
+purposes, the majority of networks in Europe and Asia do We can partially validate our methodology by checking
+not. In Asia, numbers varied widely and most ASes had little whether we failed to detect any connections that included
+description. In Europe, ASes would frequently span multiple proxy-related HTTP headers as intercepted. We ﬁnd that 1.6%
+countries and contain requests that appeared to from both home of the e-commerce connections included proxy headers, but
+8E-commerce Sites Cloudﬂare
+Browser All Trafﬁc Intercepted Of Intercepted Browser All Trafﬁc Intercepted Of Intercepted
+Chrome 40.3% 8.6% 56.2% Chrome 36.2% 14.7% 48.8%
+Explorer 16.8% 7.4% 19.6% Mobile Safari 17.5% 1.9% 3.3%
+Firefox 13.5% 8.4% 18.2% Explorer 14.9% 15.6% 21.2%
+Safari 10.2% 2.1% 3.4% Safari 8.9% 6.5% 5.3%
+Chromium 7.6% 0.1% 0.1% Firefox 8.5% 18.2% 14.2%
+Mobile Safari 7.6% 0.9% 1.1% Mobile Chrome 8.4% 4.7% 3.6%
+Other 4.0% 4.0% 2.4% Other 5.6% 7.0% 3.6%
+OS All Trafﬁc Intercepted Of Intercepted OS All Trafﬁc Intercepted Of Intercepted
+Windows 7 23.3% 9.6% 56.6% Windows 7 23.9% 13.4% 29.2%
+Windows 10 22.5% 9.3% 14.3% Windows 10 22.9% 13.1% 27.4%
+iOS 17.3% 0.1% 1.1% iOS 17.5% 2.0% 3.2%
+Mac OS 15.8% 2.1% 6.5% Mac OS 16.0% 6.6% 9.6%
+Android 9.4% 1.0% 0.5% Android 9.5% 4.8% 4.2%
+Windows 8.1 6.9% 8.3% 15.8% Windows 8.1 4.9% 24.4% 11.0%
+Other 4.8% 21.4% 15.2% Other 5.3% 31.7% 15.4%
+Fig. 13: OS and Browser Breakdown—We show the breakdown of all trafﬁc, the amount of trafﬁc intercepted, and percentage
+of all interception that each browser and operating system accounts for across both the e-commerce and Cloudﬂare vantage points.
+did not have evidence of interception in their TLS handshakes. to consistently rate browsers, interception products, and the
+This suggests that the methodology catches the vast majority connections we observe in the wild:
+of interception, but it does miss some edge cases.
+A: Optimal. The TLS connection is equivalent to a modern
+To verify that our heuristics aren’t incorrectly classifying
+web browser in terms of both security and performance. When
+valid handshakes, we investigated why our heuristics marked
+grading cipher suites, we speciﬁcally use Chrome’s deﬁnition
+connections as intercepted. We detected more than 85% of
+of “secure TLS” [11].
+intercepted connections based on the presence of known
+unsupported ciphers or extensions, rather than a missing
+B: Suboptimal. The connection uses non-ideal settings (e.g.,
+extension or invalid ordering. More than 98% of intercepted non-PFS ciphers), but is not vulnerable to known attacks.
+connections in the Firefox dataset were found based on the
+C: Known Attack. The connection is vulnerable to known
+inclusion of ciphers that have never been implemented in NSS,
+TLS attacks (e.g., BEAST, FREAK, and Logjam), accepts
+and 82% of all intercepted connections indicated support for
+768-bit Difﬁe-Hellman parameters, or advertises RC4 support.
+the heartbeat extension—an immediate giveaway given that no
+F: Severely Broken. The connection is severely broken such
+browsers support the extension. This suggests that our heuristics
+that an active man-in-the-middle attacker could intercept and
+are ﬁnding handshakes produced by other libraries rather than
+decrypt the session. For example, the product does not validate
+misclassifying browser edge cases.
+certiﬁcates, or offers known-broken cipher suites (e.g., DES).
+However, while the methodology appears sound, the three
+perspectives we studied provide differing numbers on the total
+Our grading scale focuses on the security of the TLS
+amount of interception. All three perspectives ﬁnd more than an
+handshake and does not account for the additional HTTPS
+order of magnitude more interception than previously estimated,
+validation checks present in many browsers, such as HSTS,
+and we estimate that 5–10% of connections are intercepted.
+HPKP, OneCRL/CRLSets, certiﬁcate transparency validation,
+However, we offer a word of caution on the exact numbers,
+and OCSP must-staple. None of the products we tested
+particularly for the Cloudﬂare dataset, where abuse may inﬂate
+supported these features. Therefore, products that receive an A
+the interception rate we observe.
+grade for their TLS security likely still reduce overall security
+when compared to recent versions of Chrome or Firefox.
+VI. I
+MPACT ON
+S
+ECURITY
+In this section, we investigate the security impact of
+B. Testing Security Products
+HTTPS interception. First, we introduce a grading scale for
+quantifying TLS client security. Then, we investigate common
+To measure the security of the connections initiated by
+interception products, evaluating the security of their TLS
+interception products, we installed the trial versions of the
+implementations. Based on these ratings and the features
+corporate proxies, popular client security software, and malware
+advertised in Client Hello messages, we quantify the change
+listed in Section III.
+6
+We then ran the latest version of Chrome,
+in security for intercepted connections.
+Internet Explorer, Firefox, and Safari through each product,
+visiting a website that executed the following tests:
+A. Client Security Grading Scale
+6
+Product demos could have different security proﬁles than their production
+There does not exist a standardized rubric for rating
+counterparts. However, during our disclosure process, none of the manufacturers
+TLS client security. We deﬁne and use the following scale
+we contacted indicated this.
+91) TLS Version. We check the highest version of TLS that Malware and Unwanted Software Researchers have previ-
+the product supports. We grade any client that supports at ously found that Komodia does not validate certiﬁcates [58]
+best TLS 1.1 as B, SSLv3 as C, and SSLv2 as F. and we ﬁnd that the NetFilter SDK similarly does not properly
+2) Cipher Suites. We investigate the cipher suites present in validate certiﬁcate chains. We grade both as F: severely broken.
+the Client Hello. We rate any product that does not support
+Chrome’s Strong TLS ciphers [11] as B, handshakes that
+C. Impact on TLS Trafﬁc
+offer RC4 as C, and any product that advertises broken
+While many security products have insecure defaults,
+ciphers (e.g., export-grade or DES) as F.
+intercepted connections could have a different security pro-
+3) Certiﬁcate Validation. We present a series of untrusted
+ﬁle. Security might be improved if administrators conﬁgure
+certiﬁcates, including expired, self-signed, and invalidly-
+middleboxes to perform responsible handshakes, or, even with
+signed certiﬁcates. We further test with certiﬁcates signed
+their poor security, proxies might protect further out-of-date
+by CAs with a publicly-known private key (i.e., Super-
+clients. We investigated the security of intercepted handshakes
+ﬁsh [58], eDell, and Dell provider roots [13]). We rate
+based on the parameters advertised in the handshake (e.g.,
+any product that accepts one of these certiﬁcates as F.
+TLS version and cipher suites), and in the cases where we
+4) Known TLS Attacks. We check whether clients are
+can identify the interception product, its security rating. To
+vulnerable to the BEAST, FREAK, Heartbleed, and
+determine the change in security rather than just the security of
+Logjam attacks, or accept weak Difﬁe-Hellman keys. We
+the new connection, we calculated the security of the browser
+rate any vulnerable client as C.
+7
+version speciﬁed in the HTTP User-Agent and compare that to
+the security of the handshake we observe.
+Corporate Middleboxes The default conﬁgurations for eleven
+Similar to how each of our three networks has a different
+of the twelve middleboxes we tested weaken connection
+interception rate, each vantage point presents a different security
+security, and ﬁve of the twelve products introduce severe
+impact. For Firefox, 65% of intercepted connections have
+vulnerabilities that would enable future interception by a
+reduced security and an astounding 37% have negligent security
+man-in-the-middle attacker. Ten support RC4-based ciphers,
+vulnerabilities. 27% of the e-commerce and 45% of the
+two advertise export-grade ciphers, and three have broken
+Cloudﬂare connections have reduced security, and 18% and
+certiﬁcate validation (Figure 3). We note that the installation
+16% are vulnerable to interception, respectively.
+process for many of these proxies is convoluted, crash-
+prone, and at times, non-deterministic. Conﬁguration is equally
+Interception products increased the security for 4% of
+confusing, oftentimes with little to no documentation. For
+the e-commerce and 14% of the Cloudﬂare connections. The
+example, Cisco devices allow administrators to customize
+discrepancy in increased security is largely due to temporal
+permitted cipher suites, but do not provide a list of ciphers to
+differences in data collection and the deprecation of RC4
+choose from. Instead, the device provides an undocumented
+cipher suites during this period. When the e-commerce sites
+text box that appears to accept OpenSSL cipher rules (e.g.,
+collected data in August 2015, browsers considered RC4 to
+ALL:!ADH:@STRENGTH
+). We suspect that this poor usability
+be safe. However, between August 2015 and April 2016,
+contributes to the abysmal conﬁgurations we see in the wild.
+standards bodies began advising against RC4 [50] and both
+Chrome and Firebox deprecated the cipher [59]. When grading
+We were not able to acquire a demo or trial of the ZScaler
+Cloudﬂare connections in May 2016, we labeled connections
+Proxy, a prominently advertised cloud-based middlebox. Instead,
+that advertised RC4 as C. This results in connections from
+we investigated the trafﬁc that originated from one of the
+older versions of Internet Explorer and Safari being marked
+seven ZScaler ASes in the Cloudﬂare dataset.
+8
+We found one
+insecure, and proxies improving the security for an increased
+predominant handshake ﬁngerprint that accounts for more than
+number of connections.
+four times more trafﬁc than the second most popular, and does
+not match any popular browsers indicated in the associated
+Corporate Middleboxes During our earlier analysis of cor-
+User-Agent strings. We would have rated this handshake at
+porate proxies, we found that many network middleboxes
+best B due to the lack of any perfect-forward-secret ciphers.
+inject HTTP headers, such as
+X-Forwarded-For
+and
+Via
+,
+However, we exclude it from any other analysis, because we
+to assist managing simultaneous proxied connections. We
+were not able to check for further vulnerabilities.
+analyzed the connections in the e-commerce dataset with proxy-
+related headers to better understand the security of corporate
+Client-side Security Software In line with de Carné de
+middleboxes compared to client-side software. We ﬁnd that
+Carnavalet and Mannan [12], we ﬁnd that nearly all of the client-
+connection security is signiﬁcantly worse for middleboxes
+side security products we tested reduce connection security
+than the general case. As can be seen in Figures 14 and 15,
+and ten introduce severe vulnerabilities (Figure 4). We note
+security is degraded for 62.3% of connections that traverse
+that these security grades are a lower bound that assume TLS
+a middlebox and an astounding 58.1% of connections have
+stacks have no additional vulnerabilities. However, in practice,
+severe vulnerabilities.
+researchers discover bugs in antivirus software regularly. For
+Avast alone, ten vulnerabilities have been publicly disclosed
+We note a similar phenomenon in the Firefox data where
+within the last eight months, one of which allowed remote code
+we manually investigated the top 25 ASes with more than
+execution through carefully crafted certiﬁcates [48].
+100K connections, the highest interception rates, and a single
+predominant interception ﬁngerprint. We primarily ﬁnd ﬁnancial
+ﬁrms, government agencies, and educational institutions. With
+7
+We tested these products in January–March, 2016, which was approximately
+the exception of one bank, 24 of the top 25 ASes have
+eight months after the Logjam disclosure and eleven months after FREAK.
+8
+WeinvestigatedASes62907,55242,53813,53444,40384,32921,and22616.
+worsened security due to interception. For 12 of the 25 ASes,
+10Increased Decreased Severely
+on whether interception is appropriate in order to develop
+Network
+Security Security Broken sustainable, long-term solutions.
+E-commerce (All Trafﬁc) 4.1% 26.5% 17.7%
+We should reconsider where validation occurs. Many HTTPS
+E-commerce (Middleboxes) 0.9% 62.3% 58.1%
+security features expect connections to be end-to-end by
+Cloudﬂare 14.0% 45.3% 16.0%
+mixing the HTTP and TLS layers, and by implementing
+Firefox Updates 0.0% 65.7% 36.8%
+HTTPS features in browser code rather than in TLS libraries.
+Fig. 14: Impact of Interception—We summarize the secu- For example, to overcome weaknesses in existing revocation
+rity impact of HTTPS interception, comparing client–proxy protocols, Firefox ships with OneCRL [43] and Chrome,
+connection security with proxy–server connection security. CRLSets [24]. Both of these solutions increase browser security
+in the typical end-to-end case. However, these solutions provide
+no protection in the presence of a TLS proxy and because the
+solution is not part of the TLS protocol itself, TLS libraries
+Original New Security
+Dataset
+do not implement these safe revocation checks. In a second
+Security
+→
+A
+→
+B
+→
+C
+→
+F example, HPKP directives are passed over HTTP rather than
+during the TLS handshake. Browsers cannot perform HPKP
+Firefox A
+→
+34.3% 16.8% 12.2% 36.8%
+validation for proxied connections because they do not have
+access to the destination certiﬁcate and proxies do not perform
+A
+→
+57.1% 2.9% 5.6% 8.1%
+this validation in practice.
+E-commerce Sites: B
+→
+2.7% 10.2% 1.2% 8.3%
+While it is possible for proxies to perform this additional
+All Trafﬁc C
+→
+0.6% 0.4% 1.0% 0.3%
+veriﬁcation, they are not doing so, and in many cases vendors
+F
+→
+0.0% 0.2% 0.1% 1.0%
+are struggling to correctly deploy existing TLS libraries,
+let alone implement additional security features. Given this
+A
+→
+13.5% 3.0% 0.8% 18.0%
+evidence, our community needs to decide what roles should
+E-commerce Sites: B
+→
+0.7% 23.3% 0.6% 37.8%
+be carried out by the browser versus TLS implementation.
+Middleboxes C
+→
+0.1% 0.1% 0.0% 2.2% If we expect browsers to perform this additional veriﬁcation,
+proxies need a mechanism to pass connection details (i.e.,
+F
+→
+0.0% 0.0% 0.0% 0.0%
+server certiﬁcate and cryptographic parameters) to the browser.
+A
+→
+17.3% 1.1% 29.7% 10.0% If we expect proxies to perform this validation, we need to
+standardize these validation steps in TLS and implement them in
+B
+→
+0.0% 0.0% 0.0% 0.0%
+Cloudﬂare
+popular libraries. Unfortunately the current situation, in which
+C
+→
+9.4% 3.3% 22.0% 4.5%
+we ignore proxy behavior, results in the worst case scenario
+F
+→
+0.8% 0.1% 0.4% 1.5%
+where neither party is performing strict validation.
+Fig. 15: Change in Security—We calculate the change in
+Cryptographic libraries need secure defaults. Several proxies
+connection security based on the parameters advertised in the
+deployed TLS libraries with minimal customization. Unfortu-
+Client Hello message and the security of the browser in the
+nately the default settings for these libraries were vulnerable
+HTTP User-Agent header.
+rendering the middlebox vulnerable. Client libraries and web
+servers need to prioritize making their products safe by default.
+We applaud OpenSSL’s recent decision to remove known-
+the predominant TLS handshake includes export-grade cipher
+broken cipher suites [2]. However, this change should have
+suites, making them vulnerable to future interception by an
+occurred more than a decade earlier and libraries continue to
+active man-in-the-middle attacker.
+accept other weak options. Our community should continue
+restricting default options to known safe conﬁgurations.
+VII. D
+ISCUSSION
+Antivirus vendors should reconsider intercepting HTTPS. An-
+While the security community has long known that security
+tivirus software operates locally and already has access to the
+products intercept TLS connections, we have largely ignored the
+local ﬁlesystem, browser memory, and any content loaded over
+issue. We ﬁnd that interception is occurring more pervasively
+HTTPS. Given their history of both TLS misconﬁgurations [12]
+than previously estimated and in many cases, introduces
+and RCE vulnerabilities [48], we strongly encourage antivirus
+signiﬁcant vulnerabilities. In this section, we discuss the
+providers to reconsider whether intercepting HTTPS is respon-
+implications of our measurements and make recommendations
+sible.
+for both vendors and the security community.
+Security companies are acting negligently. Many of the
+We need community consensus. There is little consensus vulnerabilities we ﬁnd in antivirus products and corporate
+within the security community on whether HTTPS interception middleboxes—such as failing to validate certiﬁcates and
+is acceptable. On the one hand, Chrome and Firefox have advertising broken ciphers—are negligent and another data
+provided tacit approval by allowing locally installed roots to point in a worrying trend of security products worsening
+bypass key pinning restrictions [34]. However, at the same security rather than improving it [12], [17]. We hope that
+time, discussions over protocol features that facilitate safer by disclosing vulnerabilities in existing products, we can
+interception have been met with great hostility within standards encourage manufacturers to patch problems. We urge companies
+groups [35], [37]. These communities need to reach consensus to prioritize the security of their TLS implementations and to
+11consider the pace at which the HTTPS ecosystem evolves and Measuring HTTPS Interception Several groups have mea-
+whether they can keep up with the necessary updates. sured the prevalence of TLS interception by deploying Flash-
+based measurements on popular websites or by purchasing ads.
+Do not rely on client conﬁguration. Because cryptographic
+In early 2014, Huang et al. analyzed 3M SSL connections to
+parameters must be supported by both the client and server,
+Facebook and found that 0.2% of connections were intercepted
+the security community has largely ignored HTTPS servers’
+by a variety of antivirus software, corporate content ﬁlters,
+lenient cipher support with the implied understanding that
+and malware [27]. A year later in 2015, O’Neill et al.
+browser vendors will only advertise secure parameters. In
+deployed a Google AdWords campaign in which they observed
+2015, Durumeric et al. found that nearly 37% of browser-
+15.2M connections and found 0.4% of TLS connections are
+trusted HTTPS servers on the IPv4 address space supported
+intercepted—nearly double the number found by Facebook [46].
+RSA export ciphers [16] despite their known weaknesses and
+We ﬁnd approximately an order of magnitude more interception
+discontinued use. It was only after the discovery of the FREAK
+at each of our three vantage points.
+attack—a bug in OpenSSL that allowed an active attacker to
+It is not immediately evident why our numbers differ
+downgrade connections to export-grade cryptography—that
+from these previous studies. It is possible that some of our
+operators began to actively disable export cipher suites.
+numbers—particularly for Cloudﬂare—are overestimates due
+While modern browsers are not vulnerable to active down-
+to abuse. However, we note that the number of intercepted
+grade attacks, nearly two thirds of connections that traverse
+connections found in these prior studies is less than the number
+a network middlebox advertise export ciphers and nearly 3%
+of connections with Blue Coat HTTP headers alone and less
+of all HTTPS connections to the e-commerce sites included
+than half of the number of connections that include proxy-
+at least one export-grade cipher suite. While these products
+related HTTP headers. There may be bias introduced by using
+would optimally not be vulnerable, their risk can be reduced by
+Flash, which browsers are in the process of deprecating and
+encouraging websites to disable weak ciphers. Similarly, some
+is not available on many mobile devices. Facebook may be
+interception products support secure ciphers, but do not order
+blocked on the types of corporate networks that have deployed
+them correctly. In this situation, servers that explicitly choose
+TLS inspection, and some malware may block connections to
+strong ciphers will negotiate a more secure connection than
+ad providers in order to inject their own ads.
+those that honor client preference. We need to practice defense-
+The two methodologies have other differences. Studying
+in-depth and encourage both clients and servers to select secure
+the certiﬁcates presented to clients provides a limited view on
+parameters instead of relying on one side to always act sanely.
+the security impacts of MITM because the client is not able
+to observe the security properties of the outgoing connection
+Administrators need to test middleboxes. Many of the
+to the destination web server. However, because clients can
+products we tested support more secure connections with
+access the certiﬁcate presented by the proxy, there is more data
+additional conﬁguration. Unfortunately, this does not appear
+on the product that intercepted the connection.
+to be happening in practice. While manufacturers clearly
+need to improve their default settings, we also encourage
+Client Security Several studies have investigated the security
+the administrators who are deploying proxies to test their
+of speciﬁc TLS clients. Georgiev et al. analyzed the security
+conﬁgurations using sites such as Qualys SSL Lab’s client
+of non-browser software that validates SSL certiﬁcates by
+test, https://howsmyssl.com, and https://badssl.com. To incen-
+installing TLS clients and validating their behavior [21]. They
+tivize better software, servers could consider checking client
+identify numerous vulnerabilities in TLS clients, including
+conﬁguration and rejecting insecure clients.
+Amazon’s EC2 client, Amazon and PayPal’s SDKs, and a
+number of other e-commerce products. They conclude that these
+VIII. R
+ELATED
+W
+ORK vulnerabilities are the result of poorly designed cryptographic
+libraries.
+There have been several recent studies on ﬁngerprinting
+TLS connections, HTTPS interception, and safe interception
+de Carné de Carnavalet and Mannan demonstrated that
+protocols:
+many popular Windows antivirus applications perform TLS
+trafﬁc inspection that weakens connection security [12]. We
+Fingerprinting TLS Handshakes While there has been little
+extend this work by investigating additional products, showing
+rigorous study on TLS handshake ﬁngerprinting, several groups
+that Mac connections have worse security than their Windows-
+have previously suggested the idea. Ristic´ ﬁrst described the
+based counterparts, and ﬁngerprinting their connections. There
+approach in 2009 [52]. Later, in 2012, Majkowski implemented
+have been repeated discussions about the theoretical danger of
+SSL ﬁngerprinting in p0f [36]. In 2015, Husá et al. used client
+network middleboxes that intercept TLS connections. Dormann
+ﬁngerprinting to broadly describe the types of HTTPS trafﬁc
+details these potential risks and lists devices that perform
+on their institutional network [28], and in 2016, Brotherston
+interception [15], but to the best of our knowledge, no
+showed how desktop applications could be identiﬁed by their
+one has systematically characterized these devices. We build
+Client Hello messages [9]. Concurrent to our work, Cisco
+on this investigation, testing devices for vulnerabilities and
+showed that malware uses different TLS parameters than
+ﬁngerprinting their behavior.
+browsers [3]. To the best of our knowledge, no groups have
+used the methodology to measure HTTPS interception. We also Alternatives to Interception Researchers have proposed both
+note that we take a slightly different approach than described in alternatives to TLS interception and TLS extensions to help
+these prior works in which we look for inconsistencies between middleboxes safely intercept connections. In the simplest case,
+the HTTP and TLS layers rather than trying to passively identify the HTTP 2.0 Explicit Trusted Proxy RFC [26] requires
+handshakes seen on the wire. middleboxes to explicitly notify the client of interception.
+12The proposed TLS Proxy Server Extension [38] extends the 58% of middlebox connections have severe vulnerabilities. We
+idea, requiring the proxy to indicate the interception, but to investigated popular antivirus and corporate proxies, ﬁnding that
+additionally relay proxy–server session information back to the nearly all reduce connection security and that many introduce
+client, such that the client can validate the server’s identify and vulnerabilities (e.g., fail to validate certiﬁcates). While the
+perform additional validation. security community has long known that security products
+intercept connections, we have largely ignored the issue,
+Naylor et al. introduced multi-context TLS (mcTLS) [44],
+believing that only a small fraction of connections are affected.
+an extended version of TLS that requires endpoints to ex-
+However, we ﬁnd that interception has become startlingly
+plicitly specify permitted middleboxes in order to securely
+widespread and with worrying consequences. We hope that by
+authenticate each hop and cryptographically control exactly
+bringing these issues to light, we can encourage manufacturers
+what data middleboxes can access. Sherry et al. eschewed any
+to improve their security proﬁles and prompt the security
+plaintext data access for middleboxes and developed BlindBox,
+community to discuss alternatives to HTTPS interception.
+a cryptographic protocol that supports both intrusion and
+data exﬁltration detection through searchable encryption [54].
+A
+CKNOWLEDGMENTS
+Lan et al. extended BlindBox with Embark, which further
+optimized keyword and preﬁx matching searchable encryption
+The authors thank Peter Bowen, Xavier de Carné de
+schemes [33].
+Carnavalet, Patrick Donahue, Alessandro Ghedini, Mohammad
+Mannan, Paul Pearce, Michal Purzynski, Ivan Ristic,´ Narseo
+Vallina Rodriguez, and Ryan Sleevi. This work was supported
+IX. R
+ESPONSIBLE
+D
+ISCLOSURE
+in part by the National Science Foundation under awards CNS-
+In the course of analyzing corporate middleboxes and 1505790, CNS-1518741, CNS-1345254, CNS-1409505, CNS-
+client-side security software, we uncovered a range of TLS 1518888, CNS-1530915, CNS-1237265, and CNS-1348077, by
+implementation errors, many of which allow connections to the Department of Energy under award DE-OE0000780, by
+be intercepted by a man-in-the-middle attacker. We disclosed the NSF Graduate Research Fellowship Program under grant
+these weaknesses to manufacturers in August 2016. Several DGE-1256260, by the Post-9/11 GI Bill, by a Google Ph.D.
+manufacturers indicated that they deployed updates that protect Fellowship, and by an Alfred P. Sloan Foundation Research
+against attacks after our testing but before disclosure. Others Fellowship.
+indicated plans to deprecate RC4 and move to modern cipher
+suites. In many cases, we received no response and in other
+R
+EFERENCES
+cases, we were unable to convince manufacturers that TLS
+[1] NetFilter SDK. http://netﬁltersdk.com/.
+vulnerabilities such as Logjam required patching. One company
+[2] OpenSSL changelog. https://www.openssl.org/news/changelog.html.
+would not accept our vulnerability report without a product
+[3] B. Anderson, S. Paul, and D. McGrew. Deciphering malware’s use of
+serial number, and several indicated that secure product
+TLS (without decryption). arXiv preprint arXiv:1607.01639, 2016.
+conﬁguration was a customer responsibility and that they would
+[4] R. Arora and N. Aggarwal. Browserstack. https://browserstack.com.
+not be updating their default conﬁguration. Figures 3 and 4
+[5] R. Barnes. Deprecating non-secure HTTP. Mozilla Security Blog. https://
+show scores prior to disclosure.
+blog.mozilla.org/security/2015/04/30/deprecating-non-secure-http/.
+[6] R.Barnes. Man-in-the-middleinterferingwithincreasedsecurity. Mozilla
+Several manufacturers asked that we note patched versions
+Security Blog. https://blog.mozilla.org/security/2016/01/06/man-in-the-
+of their products. In May 2016, A10 introduced a conﬁguration
+middle-interfering-with-increased-security/.
+wizard that recommends a more sane set of cipher suites. Avast
+[7] H. Böck. Software Privdog worse than Superﬁsh. https://blog.hboeck.de/
+removed broken ciphers from their Mac product line in July,
+archives/865-Software-Privdog-worse-than-Superﬁsh.html.
+2016. Fortinet patched the Logjam vulnerability in version 5.4.1,
+[8] H. Böck. Superﬁshy. https://github.com/hannob/superﬁshy.
+which was released in September, 2016. Qustodio patched in
+[9] L. Brotherston. Stealthier attacks and smarter defending with TLS
+October, 2016. Untangle indicated that issues had already been
+ﬁngerprinting. DerbyCon 2015.
+addressed at the time of disclosure.
+[10] E. Bursztein. Speeding up and strengthening HTTPS connections for
+Chrome on Android. https://security.googleblog.com/2014/04/speeding-
+up-and-strengthening-https.html.
+X. C
+ONCLUSION
+[11] Chromium. IsSecureTLSCipherSuite function. https://
+chromium.googlesource.com/chromium/src/net/+/master/ssl/
+In this paper, we conducted the ﬁrst comprehensive study
+ssl_cipher_suite_names.cc#373.
+on the security impact of HTTPS interception in the wild.
+[12] X. de Carné de Carnavalet and M. Mannan. Killed by proxy: Analyzing
+We characterized the TLS handshakes produced by modern
+client-end TLS interception software. In Network and Distributed System
+browsers, common security products, and malware, ﬁnding
+Security Symposium, 2016.
+that products advertise varied TLS parameters. Building on
+[13] Dell. Information on the eDellRoot and DSDTestProvider certiﬁcates.
+this observation, we constructed a set of heuristics that allow
+http://www.dell.com/support/article/us/en/19/SLN300321.
+web servers to detect HTTPS interception and identify popular
+[14] T. Dierks and E. Rescorla. Transport Layer Security (TLS) Protocol
+interception products. We deployed these heuristics on three
+Version 1.2. RFC 5246.
+diverse networks: (1) Mozilla Firefox update servers, (2) a set [15] W. Dormann. The risks of SSL inspection. https://insights.sei.cmu.edu/
+cert/2015/03/the-risks-of-ssl-inspection.html.
+of popular e-commerce sites, and (3) the Cloudﬂare content
+distribution network. In each case, we ﬁnd more than an order of
+[16] Z. Durumeric, D. Adrian, A. Mirian, M. Bailey, and J. A. Halderman.
+Tracking the FREAK attack. https://freakattack.com/.
+magnitude more interception than previously estimated, ranging
+[17] Z. Durumeric, D. Adrian, A. Mirian, J. Kasten, E. Bursztein,
+from 4–11%. As a class, interception products drastically
+N. Lidzborski, K. Thomas, V. Eranti, M. Bailey, and J. A. Halderman.
+reduce connection security. Most concerningly, 62% of trafﬁc
+Neither snow nor rain nor MITM...: An empirical analysis of email
+that traverses a network middlebox has reduced security and
+delivery security. In ACM Internet Measurement Conference, 2015.
+13[18] P. Eckersley. How unique is your web browser? In Symposium on [42] Mozilla. Network security services (NSS). https://developer.mozilla.org/
+Privacy Enhancing Technologies, 2010. en-US/docs/Mozilla/Projects/NSS.
+[19] C. Evans, C. Palmer, and R. Sleevi. Public key pinning extension for [43] Mozilla. Revoking intermediate certiﬁcates: Introducing OneCRL.
+HTTP. RFC 7469. https://blog.mozilla.org/security/2015/03/03/revoking-intermediate-
+certiﬁcates-introducing-onecrl/.
+[20] S. Farrell and H. Tschofenig. Pervasive monitoring is an attack. RFC-
+7258, 2014. [44] D. Naylor, K. Schomp, M. Varvello, I. Leontiadis, J. Blackburn, D. R.
+López, K. Papagiannaki, P. Rodriguez Rodriguez, and P. Steenkiste.
+[21] M. Georgiev, S. Iyengar, S. Jana, R. Anubhai, D. Boneh, and
+Multi-context TLS (mcTLS): Enabling secure in-network functionality
+V. Shmatikov. The most dangerous code in the world: validating SSL
+in TLS. In ACM SIGCOMM Computer Communication Review, 2015.
+certiﬁcates in non-browser software. In ACM Conference on Computer
+and Communications Security, 2012. [45] N. Nikiforakis, A. Kapravelos, W. Joosen, C. Kruegel, F. Piessens, and
+G. Vigna. Cookieless monster: Exploring the ecosystem of web-based
+[22] Google. Certiﬁcate transparency in Chrome. https://www.certiﬁcate-
+device ﬁngerprinting. In IEEE Symposium on Security and Privacy,
+transparency.org/certiﬁcate-transparency-in-chrome.
+2013.
+[23] Google. HTTPS as a ranking signal. https://webmasters.googleblog.com/
+[46] M. O’Neill, S. Ruoti, K. Seamons, and D. Zappala. TLS proxies: Friend
+2014/08/https-as-ranking-signal.html.
+or foe? In ACM Internet Measurement Conference, 2016.
+[24] Google Chromium. CRLSets. https://dev.chromium.org/Home/
+[47] OPSWAT. Antivirus and compromised device report: Janu-
+chromium-security/crlsets.
+rary 2015. https://www.opswat.com/resources/reports/antivirus-and-
+[25] J. Graham-Cumming. The two reasons to be an engineer at Cloudﬂare.
+compromised-device-january-2015.
+https://blog.cloudﬂare.com/the-two-reasons-to-work-for-cloudﬂare/.
+[48] T. Ormandy. Avast antivirus: X.509 error rendering command
+[26] H. W. Group. Explicit trusted proxy in HTTP/2.0, 2014. https://
+execution. https://bugs.chromium.org/p/project-zero/issues/detail?id=
+tools.ietf.org/html/draft-loreto-httpbis-trusted-proxy20-01.
+546&can=1&q=avast.
+[27] L. S. Huang, A. Rice, E. Ellingsen, and C. Jackson. Analyzing forged
+[49] V. Paxson. Bro: a system for detecting network intruders in real-time.
+SSL certiﬁcates in the wild. In IEEE Symposium on Security and Privacy
+In 7th USENIX Security Symposium, 1998.
+2014.
+[50] A. Popov. Prohibiting RC4 cipher suites. RFC 7465.
+[28] M. Husák, M. Cermák, T. Jirsík, and P. Celeda. Network-based HTTPS
+[51] B. Riordan-Butterworth. Adopting encryption: The need for HTTPS.
+client identiﬁcation using SSL/TLS ﬁngerprinting, 2015.
+http://www.iab.com/adopting-encryption-the-need-for-https/.
+[29] IANA. Transport layer security (TLS) extensions. http://www.iana.org/
+[52] I. Ristic. HTTP client ﬁngerprinting using SSL handshake analy-
+assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml.
+sis. https://blog.ivanristic.com/2009/06/http-client-ﬁngerprinting-using-
+[30] IANA. Transport layer security (TLS) parameters. http://www.iana.org/
+ssl-handshake-analysis.html.
+assignments/tls-parameters/tls-parameters.xhtml.
+[53] R. Seggelmann, M. Tuexen, and M. Williams. Transport layer security
+[31] A. Kirk. Web proxies, user-agent strings, and malware detection. http://
+(TLS) and datagram transport layer security (DTLS) heartbeat extension.
+blog.talosintel.com/2012/11/web-proxies-user-agent-strings-and.html.
+RFC 6520.
+[32] Komodia. Redirector. http://www.komodia.com/products/komodia-
+[54] J. Sherry, C. Lan, R. A. Popa, and S. Ratnasamy. Blindbox: Deep
+redirector.
+packet inspection over encrypted trafﬁc. In SIGCOMM Computer
+[33] C. Lan, J. Sherry, R. A. Popa, S. Ratnasamy, and Z. Liu. Embark:
+Communication Review, 2015.
+securely outsourcing middleboxes to the cloud. In USENIX Symposium
+[55] Statista. Mobile phone internet user penetration in South Korea from
+on Networked Systems Design and Implementation, 2016.
+2014 to 2019, 2016. http://www.statista.com/statistics/284204/south-
+[34] A. Langley. Public key pinning. https://www.imperialviolet.org/2011/
+korea-mobile-phone-internet-user-penetration/.
+05/04/pinning.html.
+[56] Symantec. Trojan.Nurjax. https://www.symantec.com/security_response/
+[35] P. Lepeska. Comments on explicit/trusted proxy. https://www.ietf.org/
+writeup.jsp?docid=2014-121000-1027-99.
+mail-archive/web/httpbisa/current/msg13124.html.
+[57] U.S. Digital Analytics Program. The U.S. federal government’s web
+[36] M. Majkowski. SSL ﬁngerprinting for p0f. https://idea.popcount.org/
+trafﬁc. https://analytics.usa.gov/.
+2012-06-17-ssl-ﬁngerprinting-for-p0f/.
+[58] F. Valsorda. Komodia/superﬁsh SSL validation is broken, February 2015.
+[37] D. McGrew. Comments on explicit/trusted proxy. https://www.ietf.org/
+https://blog.ﬁlippo.io/komodia-superﬁsh-ssl-validation-is-broken/.
+mail-archive/web/tls/current/msg07815.html.
+[59] M. Vanhoef and F. Piessens. All your biases belong to us: Breaking
+[38] D. McGrew, D. Wing, Y. Nir, and P. Gladstone. TLS proxy server exten-
+RC4 in WPA-TKIP and TLS. In USENIX Security Symposium, 2015.
+sion, 2012. https://tools.ietf.org/html/draft-mcgrew-tls-proxy-server-01.
+[60] N.Weaver,C.Kreibich,M.Dam,andV.Paxson. Herebewebproxies. In
+[39] Microsoft. Platform status. https://developer.microsoft.com/en-us/
+International Conference on Passive and Active Network Measurement,
+microsoft-edge/platform/status/publickeypinningextensionforhttp.
+2014.
+[40] K. Mowery, D. Bogenreif, S. Yilek, and H. Shacham. Fingerprinting
+[61] T.-F. Yen, Y. Xie, F. Yu, R. P. Yu, and M. Abadi. Host ﬁngerprinting
+information in JavaScript implementations. Web 2.0 Security & Privacy,
+and tracking on the web: Privacy and security implications. In Network
+2011.
+and Distributed System Security Symposium, 2012.
+[41] Mozilla. Installing certiﬁcates into Firefox. https://wiki.mozilla.org/CA:
+AddRootToFirefox.
+14
